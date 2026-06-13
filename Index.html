@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SpeakUp</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  @keyframes eq { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useEffect } = React;
+
+/* ---------- icons (inline SVG, no extra dependency) ---------- */
+const IconMic = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+    <line x1="12" y1="19" x2="12" y2="23" />
+    <line x1="8" y1="23" x2="16" y2="23" />
+  </svg>
+);
+const IconSquare = ({ size = 24, color = 'currentColor', fill = 'none' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={color} strokeWidth="2">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+  </svg>
+);
+const IconShuffle = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 3 21 3 21 8" /><line x1="4" y1="20" x2="21" y2="3" />
+    <polyline points="21 16 21 21 16 21" /><line x1="15" y1="15" x2="21" y2="21" /><line x1="4" y1="4" x2="9" y2="9" />
+  </svg>
+);
+const IconHistory = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l4 2" />
+  </svg>
+);
+const IconSparkles = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 3-1.9 4.1L6 9l4.1 1.9L12 15l1.9-4.1L18 9l-4.1-1.9Z" />
+    <path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" />
+  </svg>
+);
+const IconAlert = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+  </svg>
+);
+const IconX = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+const IconCopy = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+/* ---------- data & tokens ---------- */
+const PROMPTS = [
+  "Describe a skill you'd like to learn this year and why.",
+  "Talk about a memorable trip you've taken.",
+  "Explain how you'd handle a disagreement with a coworker.",
+  "Walk me through your morning routine.",
+  "Talk about a book, show, or podcast that changed how you think.",
+  "Explain something from your job to someone outside your field.",
+  "Describe a goal you're working toward right now.",
+  "Talk about a city you'd love to live in, and why.",
+  "Describe your favorite meal and how it's made.",
+  "Talk about a time you solved a tricky problem at work.",
+  "Explain why you chose your current career path.",
+  "Describe someone who has influenced how you think or work.",
+  "Talk about how technology has changed your daily routine.",
+  "Describe your ideal weekend, from morning to night.",
+  "Explain a tradition from your culture to someone unfamiliar with it.",
+];
+
+const COLORS = {
+  bg: '#16302E', card: '#1F423F', text: '#F4EFE6', textMuted: '#9DBDB5',
+  gold: '#E0A458', coral: '#E8674A', mint: '#7FCBAE', border: 'rgba(244,239,230,0.10)',
+};
+const eyebrow = { fontFamily: 'IBM Plex Mono', fontSize: '11px', letterSpacing: '0.18em', color: COLORS.textMuted, textTransform: 'uppercase' };
+const cardStyle = { background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: '18px', padding: '20px' };
+
+/* ---------- small display components ---------- */
+function FluencyGauge({ score }) {
+  const clamped = Math.max(0, Math.min(10, score || 0));
+  const angle = -90 + (clamped / 10) * 180;
+  const circumference = Math.PI * 80;
+  const fillLength = (clamped / 10) * circumference;
+  return (
+    <svg viewBox="0 0 200 110" style={{ width: '120px', flexShrink: 0 }}>
+      <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(244,239,230,0.12)" strokeWidth="10" strokeLinecap="round" />
+      <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke={COLORS.gold} strokeWidth="10" strokeLinecap="round"
+        strokeDasharray={`${fillLength} ${circumference}`} />
+      <g style={{ transform: `rotate(${angle}deg)`, transformOrigin: '100px 100px', transition: 'transform 0.6s ease' }}>
+        <line x1="100" y1="100" x2="100" y2="28" stroke={COLORS.text} strokeWidth="3" strokeLinecap="round" />
+      </g>
+      <circle cx="100" cy="100" r="5" fill={COLORS.text} />
+    </svg>
+  );
+}
+
+function Equalizer({ active }) {
+  const bars = Array.from({ length: 9 });
+  return (
+    <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', height: '32px' }}>
+      {bars.map((_, i) => (
+        <div key={i} style={{
+          width: '4px', height: '100%',
+          background: active ? COLORS.coral : 'rgba(244,239,230,0.2)',
+          borderRadius: '2px', transformOrigin: 'bottom',
+          animation: active ? `eq 0.${4 + (i % 4)}s ease-in-out infinite` : 'none',
+          animationDelay: `${i * 0.05}s`,
+          transform: active ? undefined : 'scaleY(0.25)',
+        }} />
+      ))}
+    </div>
+  );
+}
+
+function ScoreBar({ score }) {
+  if (score === null || score === undefined) {
+    return <div style={{ fontFamily: 'IBM Plex Mono', fontSize: '13px', color: COLORS.textMuted }}>N/A</div>;
+  }
+  const pct = (score / 10) * 100;
+  const color = score >= 7 ? COLORS.mint : score >= 4 ? COLORS.gold : COLORS.coral;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ flex: 1, height: '6px', background: 'rgba(244,239,230,0.12)', borderRadius: '3px', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px' }} />
+      </div>
+      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: '13px', color, minWidth: '38px', textAlign: 'right' }}>{score}/10</span>
+    </div>
+  );
+}
+
+function ScorecardRow({ category, score, comment }) {
+  return (
+    <div style={{ padding: '12px 0', borderBottom: `1px solid ${COLORS.border}` }}>
+      <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '6px' }}>{category}</div>
+      <ScoreBar score={score} />
+      {comment && <p style={{ fontSize: '13px', color: COLORS.textMuted, margin: '6px 0 0', lineHeight: 1.5 }}>{comment}</p>}
+    </div>
+  );
+}
+
+function ListCard({ title, items, numbered }) {
+  return (
+    <div style={{ ...cardStyle, marginBottom: '16px' }}>
+      <div style={{ ...eyebrow, marginBottom: '10px' }}>{title}</div>
+      <ol style={{ margin: 0, paddingLeft: numbered ? '20px' : '18px', display: 'flex', flexDirection: 'column', gap: '8px', listStyleType: numbered ? 'decimal' : 'disc' }}>
+        {items.map((item, i) => <li key={i} style={{ fontSize: '14px', lineHeight: 1.5 }}>{item}</li>)}
+      </ol>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub }) {
+  return (
+    <div>
+      <div style={{ fontSize: '12px', color: COLORS.textMuted }}>{label}</div>
+      <div style={{ fontFamily: 'Fraunces', fontWeight: 600, fontSize: '16px', marginTop: '2px' }}>{value}</div>
+      {sub && <div style={{ fontSize: '12px', color: COLORS.textMuted, marginTop: '2px' }}>{sub}</div>}
+    </div>
+  );
+}
+
+function ReportView({ report, readout }) {
+  const overall = report.scorecard?.find((s) => s.category === 'Overall Impact');
+  return (
+    <div>
+      <div style={{ ...cardStyle, marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
+          <FluencyGauge score={overall?.score} />
+          <div>
+            <div style={eyebrow}>Overall impact</div>
+            <div style={{ fontFamily: 'Fraunces', fontWeight: 700, fontSize: '36px', lineHeight: 1, color: COLORS.gold }}>
+              {overall?.score ?? '—'}<span style={{ fontSize: '18px', color: COLORS.textMuted }}>/10</span>
+            </div>
+          </div>
+        </div>
+        <p style={{ fontSize: '15px', lineHeight: 1.6, margin: 0 }}>{report.executive_summary}</p>
+      </div>
+
+      <div style={{ ...cardStyle, marginBottom: '16px' }}>
+        <div style={{ ...eyebrow, marginBottom: '10px' }}>Speech readout</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+          <Stat label="Pace" value={`${readout.wpm} wpm`} sub={readout.paceLabel} />
+          <Stat label="Pauses" value={readout.pauseCount} sub={readout.pauseCount ? `longest ${readout.longestPause.toFixed(1)}s` : undefined} />
+          <Stat label="Volume" value={readout.volumeLabel} />
+          <Stat label="Pitch variety" value={readout.pitchLabel} />
+        </div>
+      </div>
+
+      <div style={{ ...cardStyle, marginBottom: '16px' }}>
+        <div style={eyebrow}>Scorecard</div>
+        {report.scorecard?.map((row) => <ScorecardRow key={row.category} {...row} />)}
+      </div>
+
+      {report.filler_words?.length > 0 && <ListCard title="Filler words" items={report.filler_words} />}
+      {report.speech_patterns?.length > 0 && <ListCard title="Speech patterns" items={report.speech_patterns} />}
+      {report.strengths?.length > 0 && <ListCard title="Strengths" items={report.strengths} />}
+      {report.improvements?.length > 0 && <ListCard title="Areas to improve" items={report.improvements} />}
+      {report.coaching_recommendations?.length > 0 && <ListCard title="Coaching exercises" items={report.coaching_recommendations} numbered />}
+    </div>
+  );
+}
+
+function HistoryView({ history, formatDate }) {
+  if (history.length === 0) {
+    return (
+      <div style={{ ...cardStyle, padding: '32px 20px', textAlign: 'center' }}>
+        <p style={{ fontFamily: 'Fraunces', fontSize: '18px', margin: '0 0 6px' }}>No sessions yet</p>
+        <p style={{ fontSize: '14px', color: COLORS.textMuted, margin: 0 }}>Record your first practice session and it'll show up here.</p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      {history.map((entry) => {
+        const overall = entry.report?.scorecard?.find((s) => s.category === 'Overall Impact');
+        return (
+          <div key={entry.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: '16px', padding: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontFamily: 'IBM Plex Mono', fontSize: '12px', color: COLORS.textMuted }}>{formatDate(entry.date)}</span>
+              <span style={{ fontFamily: 'Fraunces', fontWeight: 700, fontSize: '18px', color: COLORS.gold }}>{overall?.score ?? '—'}/10</span>
+            </div>
+            <p style={{ fontSize: '14px', margin: '0 0 6px', color: COLORS.text, fontStyle: 'italic' }}>{entry.prompt}</p>
+            <p style={{ fontSize: '13px', margin: 0, color: COLORS.textMuted, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{entry.transcript}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- main app ---------- */
+function SpeakUp() {
+  const [promptIndex, setPromptIndex] = useState(0);
+  const [view, setView] = useState('practice');
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [interim, setInterim] = useState('');
+  const [duration, setDuration] = useState(0);
+  const [audioMetrics, setAudioMetrics] = useState(null);
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [noKeyNotice, setNoKeyNotice] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const [history, setHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem('speakup_reports');
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  });
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem('speakup_api_key') || ''; } catch (e) { return ''; }
+  });
+
+  const recognitionRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const streamRef = useRef(null);
+  const sampleIntervalRef = useRef(null);
+  const samplesRef = useRef({ volumes: [], zcrs: [], pauseStart: null, pauses: [] });
+
+  const sampleAudio = () => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+    const data = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(data);
+    let sumSquares = 0;
+    let crossings = 0;
+    for (let i = 0; i < data.length; i++) {
+      sumSquares += data[i] * data[i];
+      if (i > 0 && (data[i - 1] >= 0) !== (data[i] >= 0)) crossings++;
+    }
+    const rms = Math.sqrt(sumSquares / data.length);
+    const zcr = crossings / data.length;
+    const s = samplesRef.current;
+    s.volumes.push(rms);
+    s.zcrs.push(zcr);
+    const now = Date.now();
+    const SILENCE = 0.01;
+    if (rms < SILENCE) {
+      if (s.pauseStart === null) s.pauseStart = now;
+    } else if (s.pauseStart !== null) {
+      const dur = now - s.pauseStart;
+      if (dur > 600) s.pauses.push(dur);
+      s.pauseStart = null;
+    }
+  };
+
+  const computeMetrics = (s) => {
+    if (!s || s.volumes.length === 0) return null;
+    const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const variance = (arr) => { const m = avg(arr); return avg(arr.map((x) => (x - m) ** 2)); };
+    const avgVolume = avg(s.volumes);
+    const volCV = avgVolume > 0 ? Math.sqrt(variance(s.volumes)) / avgVolume : 0;
+    const avgZcr = avg(s.zcrs);
+    const pitchCV = avgZcr > 0 ? Math.sqrt(variance(s.zcrs)) / avgZcr : 0;
+    const pauseCount = s.pauses.length;
+    const longestPause = pauseCount ? Math.max(...s.pauses) / 1000 : 0;
+    const totalPauseTime = s.pauses.reduce((a, b) => a + b, 0) / 1000;
+    const volumeLabel = volCV < 0.25 ? 'flat, steady loudness' : volCV > 0.55 ? 'highly varied loudness' : 'moderately varied loudness';
+    const pitchLabel = pitchCV < 0.15 ? 'low pitch variation (monotone)' : pitchCV > 0.35 ? 'expressive, varied pitch' : 'moderate pitch variation';
+    return { volumeLabel, pitchLabel, pauseCount, longestPause, totalPauseTime };
+  };
+
+  const cleanupAudio = () => {
+    if (sampleIntervalRef.current) { clearInterval(sampleIntervalRef.current); sampleIntervalRef.current = null; }
+    if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    analyserRef.current = null;
+    setAudioMetrics(computeMetrics(samplesRef.current));
+  };
+
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setSpeechSupported(false); return; }
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.onresult = (e) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+        else interimText += e.results[i][0].transcript;
+      }
+      setTranscript((prev) => (finalText || prev));
+      setInterim(interimText);
+    };
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'permission-denied') {
+        setError('Microphone access is blocked for this site. Allow it when prompted, or check the site permissions for this page.');
+      } else if (e.error === 'audio-capture') {
+        setError('No microphone was found on this device.');
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        setError('Recording stopped unexpectedly. Tap the mic to try again.');
+      }
+      setIsRecording(false);
+      cleanupAudio();
+    };
+    recognition.onend = () => { setIsRecording(false); cleanupAudio(); };
+    recognitionRef.current = recognition;
+  }, []);
+
+  useEffect(() => {
+    let interval;
+    if (isRecording) interval = setInterval(() => setDuration((d) => d + 1), 1000);
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  useEffect(() => {
+    try { localStorage.setItem('speakup_api_key', apiKey); } catch (e) {}
+  }, [apiKey]);
+
+  const startRecording = async () => {
+    if (!speechSupported) return;
+    setTranscript(''); setInterim(''); setReport(null); setError(null);
+    setDuration(0); setAudioMetrics(null); setNoKeyNotice(false);
+    samplesRef.current = { volumes: [], zcrs: [], pauseStart: null, pauses: [] };
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      await audioCtx.resume();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      audioCtxRef.current = audioCtx;
+      analyserRef.current = analyser;
+      sampleIntervalRef.current = setInterval(sampleAudio, 100);
+    } catch (e) {
+      // audio-level analysis unavailable; transcript-based analysis still works
+    }
+
+    try {
+      recognitionRef.current.start();
+      setIsRecording(true);
+    } catch (e) {
+      setError('Could not start the microphone. Try again in a moment.');
+      cleanupAudio();
+    }
+  };
+
+  const stopRecording = () => {
+    try { recognitionRef.current?.stop(); } catch (e) {}
+    setIsRecording(false);
+    cleanupAudio();
+  };
+
+  const newPrompt = () => {
+    let next = Math.floor(Math.random() * PROMPTS.length);
+    if (next === promptIndex) next = (next + 1) % PROMPTS.length;
+    setPromptIndex(next);
+    setTranscript(''); setInterim(''); setReport(null); setError(null);
+    setDuration(0); setAudioMetrics(null); setNoKeyNotice(false);
+  };
+
+  const displayTranscript = (transcript + ' ' + interim).trim();
+  const wordCount = displayTranscript ? displayTranscript.split(/\s+/).length : 0;
+  const wpm = duration > 0 ? Math.round((wordCount / duration) * 60) : 0;
+  const paceLabel = wpm === 0 ? 'n/a' : wpm < 110 ? 'slow' : wpm > 190 ? 'very fast' : wpm > 160 ? 'fast' : 'moderate';
+
+  const readout = {
+    wpm, paceLabel,
+    volumeLabel: audioMetrics?.volumeLabel ?? 'not available',
+    pitchLabel: audioMetrics?.pitchLabel ?? 'not available',
+    pauseCount: audioMetrics?.pauseCount ?? 0,
+    longestPause: audioMetrics?.longestPause ?? 0,
+  };
+
+  const copyTranscript = async () => {
+    try {
+      await navigator.clipboard.writeText(displayTranscript);
+      setError(null);
+    } catch (e) {
+      setError('Could not copy automatically. Select and copy the transcript text manually.');
+    }
+  };
+
+  const getReport = async () => {
+    const fullTranscript = displayTranscript;
+    if (!fullTranscript) return;
+
+    if (!apiKey) {
+      setNoKeyNotice(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setNoKeyNotice(false);
+
+    const metricsLines = [
+      `- Duration: ${duration} seconds`,
+      `- Word count: ${wordCount}`,
+      `- Speaking pace: ~${wpm} words per minute (${paceLabel})`,
+    ];
+    if (audioMetrics) {
+      metricsLines.push(`- Loudness pattern: ${audioMetrics.volumeLabel}`);
+      metricsLines.push(`- Pitch/intonation pattern: ${audioMetrics.pitchLabel}`);
+      metricsLines.push(`- Pauses longer than 0.6s: ${audioMetrics.pauseCount}, longest ${audioMetrics.longestPause.toFixed(1)}s, total pause time ${audioMetrics.totalPauseTime.toFixed(1)}s`);
+    } else {
+      metricsLines.push('- Loudness and pitch metrics: not available for this recording');
+    }
+
+    const prompt = `You are an expert communication coach and speech evaluator. Analyze the speaker's communication skills based on the speech below. Be objective, constructive, and specific. This is a single monologue, not a back-and-forth conversation, so the "Listening Skills" category does not apply and should be scored null.
+
+SPEAKING PROMPT THEY RESPONDED TO:
+"${PROMPTS[promptIndex]}"
+
+TRANSCRIPT OF WHAT THEY SAID:
+"${fullTranscript}"
+
+OBJECTIVE METRICS MEASURED DURING THE RECORDING:
+${metricsLines.join('\n')}
+
+Evaluate these areas using both the transcript and the metrics:
+1. Content and Organization - clarity of ideas, logical flow, intro/body/conclusion structure, relevance and coherence.
+2. Voice and Delivery - pace, volume, tone/energy, vocal variety, use of pauses. Base this primarily on the objective metrics, and note that these readings are estimates from audio analysis.
+3. Fluency - filler words, repetitions, hesitations, awkward pauses.
+4. Language - grammar, vocabulary, sentence structure, professionalism and clarity.
+5. Confidence - vocal confidence, conviction and enthusiasm, engagement and presence.
+6. Listening Skills - mark as null, this format does not support it.
+7. Overall Impact - holistic score.
+
+For each category give a score 1-10 (null for Listening Skills) and one specific, concise sentence referencing the transcript or metrics.
+
+Respond with ONLY valid JSON, no markdown formatting, no preamble, in this exact shape:
+{
+  "executive_summary": "<3-4 sentence summary of overall communication effectiveness>",
+  "scorecard": [
+    {"category": "Content and Organization", "score": <1-10>, "comment": "<one sentence>"},
+    {"category": "Voice and Delivery", "score": <1-10>, "comment": "<one sentence>"},
+    {"category": "Fluency", "score": <1-10>, "comment": "<one sentence>"},
+    {"category": "Language", "score": <1-10>, "comment": "<one sentence>"},
+    {"category": "Confidence", "score": <1-10>, "comment": "<one sentence>"},
+    {"category": "Listening Skills", "score": null, "comment": "N/A - requires a conversation format"},
+    {"category": "Overall Impact", "score": <1-10>, "comment": "<one sentence>"}
+  ],
+  "filler_words": ["<filler word with count, e.g. um (x4)>"],
+  "speech_patterns": ["<repeated phrase or notable habit, short>"],
+  "strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "improvements": ["<area 1>", "<area 2>", "<area 3>"],
+  "coaching_recommendations": ["<exercise 1>", "<exercise 2>", "<exercise 3>", "<exercise 4>", "<exercise 5>"]
+}`;
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message || 'API error');
+      const text = data.content.map((b) => b.text || '').join('');
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      setReport(parsed);
+
+      const entry = { id: Date.now(), prompt: PROMPTS[promptIndex], transcript: fullTranscript, duration, readout, report: parsed, date: new Date().toISOString() };
+      const newHistory = [entry, ...history].slice(0, 50);
+      setHistory(newHistory);
+      try { localStorage.setItem('speakup_reports', JSON.stringify(newHistory)); } catch (e) {}
+    } catch (e) {
+      setError('Could not generate the analysis: ' + e.message);
+    }
+    setLoading(false);
+  };
+
+  const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const formatDate = (iso) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+  return (
+    <div style={{ background: COLORS.bg, color: COLORS.text, minHeight: '100vh' }}>
+      <div style={{ maxWidth: '480px', margin: '0 auto', padding: '24px 20px 60px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+          <div>
+            <div style={eyebrow}>Speech analysis</div>
+            <h1 style={{ fontFamily: 'Fraunces', fontWeight: 600, fontSize: '32px', margin: '4px 0 0' }}>SpeakUp</h1>
+          </div>
+          <button onClick={() => setView(view === 'practice' ? 'history' : 'practice')}
+            style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: '10px', padding: '10px', color: COLORS.text, cursor: 'pointer' }}
+            aria-label={view === 'practice' ? 'View history' : 'Back to practice'}>
+            {view === 'practice' ? <IconHistory size={18} /> : <IconX size={18} />}
+          </button>
+        </div>
+
+        {view === 'history' ? (
+          <HistoryView history={history} formatDate={formatDate} />
+        ) : (
+          <>
+            <div style={{ ...cardStyle, marginBottom: '16px' }}>
+              <div style={{ ...eyebrow, marginBottom: '8px' }}>Anthropic API key (optional)</div>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-ant-... (for instant AI analysis)"
+                style={{ width: '100%', background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: '10px', padding: '10px 12px', color: COLORS.text, fontSize: '13px', fontFamily: 'IBM Plex Mono' }}
+              />
+              <p style={{ fontSize: '12px', color: COLORS.textMuted, margin: '8px 0 0', lineHeight: 1.5 }}>
+                Stored only in this browser. Without a key, you can still record and see your speech readout, then copy the transcript to paste into your Claude chat for a free analysis.
+              </p>
+            </div>
+
+            <div style={{ ...cardStyle, marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={eyebrow}>Today's prompt</div>
+                <button onClick={newPrompt} disabled={isRecording}
+                  style={{ background: 'none', border: 'none', color: isRecording ? COLORS.textMuted : COLORS.gold, cursor: isRecording ? 'default' : 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>
+                  <IconShuffle size={14} /> New
+                </button>
+              </div>
+              <p style={{ fontFamily: 'Fraunces', fontWeight: 500, fontSize: '21px', lineHeight: 1.4, margin: '12px 0 0' }}>
+                {PROMPTS[promptIndex]}
+              </p>
+            </div>
+
+            {!speechSupported && (
+              <div style={{ ...cardStyle, border: `1px solid ${COLORS.coral}`, marginBottom: '16px', display: 'flex', gap: '10px' }}>
+                <IconAlert size={18} color={COLORS.coral} />
+                <div style={{ fontSize: '14px', lineHeight: 1.5, color: COLORS.textMuted }}>
+                  Speech recognition isn't available in this browser. Open this page in Chrome on Android for recording to work.
+                </div>
+              </div>
+            )}
+
+            <div style={{ ...cardStyle, marginBottom: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              <button onClick={isRecording ? stopRecording : startRecording} disabled={!speechSupported}
+                style={{
+                  width: '72px', height: '72px', borderRadius: '50%', border: 'none',
+                  background: isRecording ? COLORS.coral : COLORS.gold,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: speechSupported ? 'pointer' : 'not-allowed',
+                  opacity: speechSupported ? 1 : 0.4, transition: 'background 0.2s ease',
+                }} aria-label={isRecording ? 'Stop recording' : 'Start recording'}>
+                {isRecording ? <IconSquare size={26} color={COLORS.bg} fill={COLORS.bg} /> : <IconMic size={28} color={COLORS.bg} />}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontFamily: 'IBM Plex Mono', fontSize: '20px', color: isRecording ? COLORS.coral : COLORS.textMuted }}>{formatTime(duration)}</span>
+                <Equalizer active={isRecording} />
+              </div>
+              <div style={{ fontSize: '13px', color: COLORS.textMuted, textAlign: 'center' }}>
+                {isRecording ? 'Listening — tap to stop' : displayTranscript ? 'Tap to record a new take' : 'Tap to start speaking'}
+              </div>
+            </div>
+
+            {error && (
+              <div style={{ background: 'rgba(232,103,74,0.12)', border: `1px solid ${COLORS.coral}`, borderRadius: '14px', padding: '14px', marginBottom: '16px', fontSize: '13px', color: COLORS.text }}>
+                {error}
+              </div>
+            )}
+
+            {displayTranscript && (
+              <div style={{ ...cardStyle, marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', ...eyebrow, marginBottom: '10px' }}>
+                  <span>Transcript</span>
+                  <span>{wordCount} words</span>
+                </div>
+                <p style={{ fontSize: '15px', lineHeight: 1.6, margin: 0, color: COLORS.text }}>{displayTranscript}</p>
+              </div>
+            )}
+
+            {displayTranscript && !isRecording && (
+              <button onClick={getReport} disabled={loading}
+                style={{
+                  width: '100%', background: COLORS.gold, color: COLORS.bg, border: 'none', borderRadius: '14px',
+                  padding: '15px', fontSize: '15px', fontWeight: 600, cursor: loading ? 'default' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  opacity: loading ? 0.7 : 1, marginBottom: '16px',
+                }}>
+                <IconSparkles size={16} /> {loading ? 'Analyzing speech...' : 'Analyze speech'}
+              </button>
+            )}
+
+            {noKeyNotice && (
+              <div style={{ ...cardStyle, marginBottom: '16px' }}>
+                <p style={{ fontSize: '14px', lineHeight: 1.6, margin: '0 0 12px' }}>
+                  No API key added, so AI analysis can't run here. Your speech readout above (pace, volume, pitch, pauses) still works. Copy the transcript and paste it into your Claude chat for a full free analysis.
+                </p>
+                <button onClick={copyTranscript}
+                  style={{ background: 'none', border: `1px solid ${COLORS.border}`, borderRadius: '10px', padding: '10px 14px', color: COLORS.text, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                  <IconCopy size={14} /> Copy transcript
+                </button>
+              </div>
+            )}
+
+            {report && <ReportView report={report} readout={readout} />}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<SpeakUp />);
+</script>
+</body>
+</html>
