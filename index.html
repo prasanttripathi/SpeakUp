@@ -277,8 +277,9 @@ function SpeakUp() {
   const streamRef = useRef(null);
   const sampleIntervalRef = useRef(null);
   const samplesRef = useRef({ volumes: [], zcrs: [], pauseStart: null, pauses: [] });
-  const currentSessionRef = useRef({ final: '', interim: '' });
   const accumulatedFinalRef = useRef('');
+  const lastFinalChunkRef = useRef('');
+  const processedCountRef = useRef(0);
   const shouldRestartRef = useRef(false);
   const restartTimeoutRef = useRef(null);
   const restartCountRef = useRef(0);
@@ -350,17 +351,28 @@ function SpeakUp() {
     recognition.onsoundstart = () => logDebug('soundstart (sound detected)');
     recognition.onspeechstart = () => logDebug('speechstart (speech detected)');
     recognition.onnomatch = () => logDebug('nomatch (no recognizable speech)');
-    recognition.onstart = () => logDebug('recognition started');
+    recognition.onstart = () => { logDebug('recognition started'); processedCountRef.current = 0; };
     recognition.onresult = (e) => {
-      let finalText = '';
+      const results = e.results;
       let interimText = '';
-      for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
-        else interimText += e.results[i][0].transcript;
+      let appended = '';
+      for (let i = processedCountRef.current; i < results.length; i++) {
+        const text = results[i][0].transcript.trim();
+        if (results[i].isFinal) {
+          const normalized = text.toLowerCase();
+          if (text && normalized !== lastFinalChunkRef.current) {
+            accumulatedFinalRef.current += text + ' ';
+            lastFinalChunkRef.current = normalized;
+            appended += text + ' ';
+          }
+          processedCountRef.current = i + 1;
+        } else {
+          interimText += results[i][0].transcript;
+        }
       }
-      logDebug(`onresult: ${e.results.length} result(s) final="${finalText.slice(0, 25)}" interim="${interimText.slice(0, 25)}"`);
-      currentSessionRef.current = { final: finalText, interim: interimText };
-      setTranscript(accumulatedFinalRef.current + finalText);
+      if (appended) logDebug(`onresult: +final "${appended.trim().slice(0, 30)}"`);
+      else if (interimText) logDebug(`onresult: interim "${interimText.slice(0, 30)}"`);
+      setTranscript(accumulatedFinalRef.current);
       setInterim(interimText);
     };
     recognition.onerror = (e) => {
@@ -379,9 +391,7 @@ function SpeakUp() {
       }
     };
     recognition.onend = () => {
-      logDebug(`onend, restart=${shouldRestartRef.current}, sessionFinal="${currentSessionRef.current.final.slice(0, 25)}"`);
-      accumulatedFinalRef.current += currentSessionRef.current.final;
-      currentSessionRef.current = { final: '', interim: '' };
+      logDebug(`onend, restart=${shouldRestartRef.current}`);
       if (shouldRestartRef.current) {
         restartCountRef.current += 1;
         if (restartCountRef.current > MAX_RESTARTS) {
@@ -427,7 +437,8 @@ function SpeakUp() {
     setDuration(0); setAudioMetrics(null); setNoKeyNotice(false);
     samplesRef.current = { volumes: [], zcrs: [], pauseStart: null, pauses: [] };
     accumulatedFinalRef.current = '';
-    currentSessionRef.current = { final: '', interim: '' };
+    lastFinalChunkRef.current = '';
+    processedCountRef.current = 0;
     shouldRestartRef.current = true;
     restartCountRef.current = 0;
 
@@ -610,7 +621,7 @@ Respond with ONLY valid JSON, no markdown formatting, no preamble, in this exact
       <div style={{ maxWidth: '480px', margin: '0 auto', padding: '24px 20px 60px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
-            <div style={eyebrow}>Speech analysis · build v4</div>
+            <div style={eyebrow}>Speech analysis · build v5</div>
             <h1 style={{ fontFamily: 'Fraunces', fontWeight: 600, fontSize: '32px', margin: '4px 0 0' }}>SpeakUp</h1>
           </div>
           <button onClick={() => setView(view === 'practice' ? 'history' : 'practice')}
