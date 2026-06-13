@@ -268,6 +268,8 @@ function SpeakUp() {
   const [apiKey, setApiKey] = useState(() => {
     try { return localStorage.getItem('speakup_api_key') || ''; } catch (e) { return ''; }
   });
+  const [enableAudioMetrics, setEnableAudioMetrics] = useState(false);
+  const [debugLog, setDebugLog] = useState([]);
 
   const recognitionRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -275,6 +277,16 @@ function SpeakUp() {
   const streamRef = useRef(null);
   const sampleIntervalRef = useRef(null);
   const samplesRef = useRef({ volumes: [], zcrs: [], pauseStart: null, pauses: [] });
+  const currentSessionRef = useRef({ final: '', interim: '' });
+  const accumulatedFinalRef = useRef('');
+  const shouldRestartRef = useRef(false);
+  const restartTimeoutRef = useRef(null);
+  const restartCountRef = useRef(0);
+  const MAX_RESTARTS = 25;
+
+  const logDebug = (msg) => {
+    setDebugLog((prev) => [...prev.slice(-19), `${new Date().toLocaleTimeString()} ${msg}`]);
+  };
 
   const sampleAudio = () => {
     const analyser = analyserRef.current;
@@ -334,6 +346,11 @@ function SpeakUp() {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
+    recognition.onaudiostart = () => logDebug('audiostart (mic opened)');
+    recognition.onsoundstart = () => logDebug('soundstart (sound detected)');
+    recognition.onspeechstart = () => logDebug('speechstart (speech detected)');
+    recognition.onnomatch = () => logDebug('nomatch (no recognizable speech)');
+    recognition.onstart = () => logDebug('recognition started');
     recognition.onresult = (e) => {
       let finalText = '';
       let interimText = '';
@@ -341,21 +358,56 @@ function SpeakUp() {
         if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
         else interimText += e.results[i][0].transcript;
       }
-      setTranscript((prev) => (finalText || prev));
+      logDebug(`onresult: ${e.results.length} result(s) final="${finalText.slice(0, 25)}" interim="${interimText.slice(0, 25)}"`);
+      currentSessionRef.current = { final: finalText, interim: interimText };
+      setTranscript(accumulatedFinalRef.current + finalText);
       setInterim(interimText);
     };
     recognition.onerror = (e) => {
+      logDebug(`onerror: ${e.error}`);
       if (e.error === 'not-allowed' || e.error === 'permission-denied') {
         setError('Microphone access is blocked for this site. Allow it when prompted, or check the site permissions for this page.');
+        shouldRestartRef.current = false;
       } else if (e.error === 'audio-capture') {
         setError('No microphone was found on this device.');
-      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
-        setError('Recording stopped unexpectedly. Tap the mic to try again.');
+        shouldRestartRef.current = false;
+      } else if (e.error === 'no-speech' || e.error === 'aborted' || e.error === 'network') {
+        // transient - let onend decide whether to retry
+      } else {
+        setError(`Recording stopped (${e.error}). Tap the mic to try again.`);
+        shouldRestartRef.current = false;
       }
-      setIsRecording(false);
-      cleanupAudio();
     };
-    recognition.onend = () => { setIsRecording(false); cleanupAudio(); };
+    recognition.onend = () => {
+      logDebug(`onend, restart=${shouldRestartRef.current}, sessionFinal="${currentSessionRef.current.final.slice(0, 25)}"`);
+      accumulatedFinalRef.current += currentSessionRef.current.final;
+      currentSessionRef.current = { final: '', interim: '' };
+      if (shouldRestartRef.current) {
+        restartCountRef.current += 1;
+        if (restartCountRef.current > MAX_RESTARTS) {
+          logDebug(`giving up after ${MAX_RESTARTS} restarts`);
+          setError(`Recognition restarted ${MAX_RESTARTS} times without producing text. This device's browser speech engine likely isn't working. Copy the debug log below and send it back.`);
+          shouldRestartRef.current = false;
+          setIsRecording(false);
+          cleanupAudio();
+          return;
+        }
+        setInterim('');
+        restartTimeoutRef.current = setTimeout(() => {
+          try {
+            recognitionRef.current?.start();
+          } catch (e) {
+            logDebug('restart failed: ' + e.message);
+            shouldRestartRef.current = false;
+            setIsRecording(false);
+            cleanupAudio();
+          }
+        }, 300);
+      } else {
+        setIsRecording(false);
+        cleanupAudio();
+      }
+    };
     recognitionRef.current = recognition;
   }, []);
 
@@ -374,34 +426,48 @@ function SpeakUp() {
     setTranscript(''); setInterim(''); setReport(null); setError(null);
     setDuration(0); setAudioMetrics(null); setNoKeyNotice(false);
     samplesRef.current = { volumes: [], zcrs: [], pauseStart: null, pauses: [] };
+    accumulatedFinalRef.current = '';
+    currentSessionRef.current = { final: '', interim: '' };
+    shouldRestartRef.current = true;
+    restartCountRef.current = 0;
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const audioCtx = new AudioCtx();
-      await audioCtx.resume();
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 2048;
-      source.connect(analyser);
-      audioCtxRef.current = audioCtx;
-      analyserRef.current = analyser;
-      sampleIntervalRef.current = setInterval(sampleAudio, 100);
-    } catch (e) {
-      // audio-level analysis unavailable; transcript-based analysis still works
+    if (enableAudioMetrics) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        await audioCtx.resume();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+        audioCtxRef.current = audioCtx;
+        analyserRef.current = analyser;
+        sampleIntervalRef.current = setInterval(sampleAudio, 100);
+        logDebug('audio metrics: mic stream ok');
+      } catch (e) {
+        logDebug('audio metrics: getUserMedia failed - ' + e.message);
+      }
+    } else {
+      logDebug('audio metrics: disabled');
     }
 
     try {
+      logDebug('calling recognition.start()');
       recognitionRef.current.start();
       setIsRecording(true);
     } catch (e) {
+      shouldRestartRef.current = false;
+      logDebug('recognition.start() threw: ' + e.message);
       setError('Could not start the microphone. Try again in a moment.');
       cleanupAudio();
     }
   };
 
   const stopRecording = () => {
+    shouldRestartRef.current = false;
+    if (restartTimeoutRef.current) { clearTimeout(restartTimeoutRef.current); restartTimeoutRef.current = null; }
     try { recognitionRef.current?.stop(); } catch (e) {}
     setIsRecording(false);
     cleanupAudio();
@@ -544,7 +610,7 @@ Respond with ONLY valid JSON, no markdown formatting, no preamble, in this exact
       <div style={{ maxWidth: '480px', margin: '0 auto', padding: '24px 20px 60px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
-            <div style={eyebrow}>Speech analysis</div>
+            <div style={eyebrow}>Speech analysis · build v4</div>
             <h1 style={{ fontFamily: 'Fraunces', fontWeight: 600, fontSize: '32px', margin: '4px 0 0' }}>SpeakUp</h1>
           </div>
           <button onClick={() => setView(view === 'practice' ? 'history' : 'practice')}
@@ -611,6 +677,23 @@ Respond with ONLY valid JSON, no markdown formatting, no preamble, in this exact
               </div>
               <div style={{ fontSize: '13px', color: COLORS.textMuted, textAlign: 'center' }}>
                 {isRecording ? 'Listening — tap to stop' : displayTranscript ? 'Tap to record a new take' : 'Tap to start speaking'}
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: COLORS.textMuted }}>
+                <input type="checkbox" checked={enableAudioMetrics} onChange={(e) => setEnableAudioMetrics(e.target.checked)} disabled={isRecording} />
+                Enable pace/volume/pitch analysis (experimental)
+              </label>
+            </div>
+
+            <div style={{ ...cardStyle, marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={eyebrow}>Debug log</div>
+                <button onClick={() => navigator.clipboard?.writeText(debugLog.join('\n'))}
+                  style={{ background: 'none', border: `1px solid ${COLORS.border}`, borderRadius: '8px', padding: '4px 10px', color: COLORS.textMuted, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                  <IconCopy size={12} /> Copy
+                </button>
+              </div>
+              <div style={{ fontFamily: 'IBM Plex Mono', fontSize: '11px', lineHeight: 1.6, color: COLORS.textMuted, maxHeight: '160px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                {debugLog.length === 0 ? 'Tap the mic to start...' : debugLog.join('\n')}
               </div>
             </div>
 
