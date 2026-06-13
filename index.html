@@ -275,6 +275,10 @@ function SpeakUp() {
   const streamRef = useRef(null);
   const sampleIntervalRef = useRef(null);
   const samplesRef = useRef({ volumes: [], zcrs: [], pauseStart: null, pauses: [] });
+  const currentSessionRef = useRef({ final: '', interim: '' });
+  const accumulatedFinalRef = useRef('');
+  const shouldRestartRef = useRef(false);
+  const restartTimeoutRef = useRef(null);
 
   const sampleAudio = () => {
     const analyser = analyserRef.current;
@@ -341,21 +345,43 @@ function SpeakUp() {
         if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
         else interimText += e.results[i][0].transcript;
       }
-      setTranscript((prev) => (finalText || prev));
+      currentSessionRef.current = { final: finalText, interim: interimText };
+      setTranscript(accumulatedFinalRef.current + finalText);
       setInterim(interimText);
     };
     recognition.onerror = (e) => {
       if (e.error === 'not-allowed' || e.error === 'permission-denied') {
         setError('Microphone access is blocked for this site. Allow it when prompted, or check the site permissions for this page.');
+        shouldRestartRef.current = false;
       } else if (e.error === 'audio-capture') {
         setError('No microphone was found on this device.');
-      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        shouldRestartRef.current = false;
+      } else if (e.error === 'no-speech' || e.error === 'aborted') {
+        // expected during brief pauses/auto-restarts - let onend handle restart
+      } else {
         setError('Recording stopped unexpectedly. Tap the mic to try again.');
+        shouldRestartRef.current = false;
       }
-      setIsRecording(false);
-      cleanupAudio();
     };
-    recognition.onend = () => { setIsRecording(false); cleanupAudio(); };
+    recognition.onend = () => {
+      accumulatedFinalRef.current += currentSessionRef.current.final;
+      currentSessionRef.current = { final: '', interim: '' };
+      if (shouldRestartRef.current) {
+        setInterim('');
+        restartTimeoutRef.current = setTimeout(() => {
+          try {
+            recognitionRef.current?.start();
+          } catch (e) {
+            shouldRestartRef.current = false;
+            setIsRecording(false);
+            cleanupAudio();
+          }
+        }, 250);
+      } else {
+        setIsRecording(false);
+        cleanupAudio();
+      }
+    };
     recognitionRef.current = recognition;
   }, []);
 
@@ -374,6 +400,9 @@ function SpeakUp() {
     setTranscript(''); setInterim(''); setReport(null); setError(null);
     setDuration(0); setAudioMetrics(null); setNoKeyNotice(false);
     samplesRef.current = { volumes: [], zcrs: [], pauseStart: null, pauses: [] };
+    accumulatedFinalRef.current = '';
+    currentSessionRef.current = { final: '', interim: '' };
+    shouldRestartRef.current = true;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -396,12 +425,15 @@ function SpeakUp() {
       recognitionRef.current.start();
       setIsRecording(true);
     } catch (e) {
+      shouldRestartRef.current = false;
       setError('Could not start the microphone. Try again in a moment.');
       cleanupAudio();
     }
   };
 
   const stopRecording = () => {
+    shouldRestartRef.current = false;
+    if (restartTimeoutRef.current) { clearTimeout(restartTimeoutRef.current); restartTimeoutRef.current = null; }
     try { recognitionRef.current?.stop(); } catch (e) {}
     setIsRecording(false);
     cleanupAudio();
